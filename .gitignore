@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+reports/
+uploads/
+.claude/
+*.ico

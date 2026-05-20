@@ -1,0 +1,25 @@
+{
+  "docx_path": "测试论文.docx",
+  "reports_dir": "reports",
+  "school_name": "浙江工业大学",
+  "cover": {
+    "school_name": "浙江工业大学",
+    "required_fields": [
+      "学校名称",
+      "论文题目",
+      "学院",
+      "班级",
+      "学号",
+      "学生姓名",
+      "指导老师",
+      "专业",
+      "提交日期"
+    ]
+  },
+  "commitment": {
+    "keywords": ["诚信承诺书", "本人慎重承诺", "签名"],
+    "school_keyword": "浙江工业大学"
+  }
+}
+
+
