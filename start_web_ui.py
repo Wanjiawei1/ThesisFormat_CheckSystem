@@ -19,6 +19,7 @@ import webbrowser
 import uuid
 from datetime import datetime
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 import markdown
 from flask import Flask, request, render_template_string, send_file
@@ -609,6 +610,13 @@ def _build_report_html(detailed_reports):
     return '\n'.join(parts)
 
 
+@app.route("/favicon.ico")
+def favicon():
+    """提供网站图标"""
+    from flask import send_from_directory
+    return send_from_directory(os.path.dirname(__file__), "zjut.ico", mimetype="image/vnd.microsoft.icon")
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     error = None
@@ -642,27 +650,6 @@ def index():
             highlight_path = os.path.join(UPLOAD_DIR, highlight_filename)
             shutil.copyfile(save_path, highlight_path)
 
-            # 生成批注版文档
-            comment_filename = None
-            if COMMENT_ENABLED:
-                try:
-                    comment_filename = f"{uid}_{os.path.splitext(os.path.basename(file.filename))[0]}_批注版.docx"
-                    comment_path = os.path.join(UPLOAD_DIR, comment_filename)
-                    print(f"[INFO] 开始生成批注版: {comment_path}")
-                    run_all_checks_with_comments(save_path, comment_path)
-                    if os.path.exists(comment_path):
-                        print(f"[OK] 批注版生成成功: {comment_filename}")
-                    else:
-                        print(f"[WARN] 批注版文件未生成")
-                        comment_filename = None
-                except Exception as e:
-                    print(f"[ERROR] 批注版生成失败: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    comment_filename = None
-            else:
-                print("[WARN] 批注功能未启用 (COMMENT_ENABLED=False)")
-
             # 为本次检测创建专属 reports 子目录
             reports_subdir = os.path.join(BASE_DIR_RUNTIME, "reports", uid)
             os.makedirs(reports_subdir, exist_ok=True)
@@ -674,31 +661,68 @@ def index():
             run_cfg["reports_dir"] = reports_subdir
             run_cfg["highlight_path"] = highlight_path
 
-            # 运行检测
+            # 批注版文件名（提前计算，与核心检测并行执行）
+            comment_filename = None
+            comment_path = None
+            if COMMENT_ENABLED:
+                comment_filename = f"{uid}_{os.path.splitext(os.path.basename(file.filename))[0]}_批注版.docx"
+                comment_path = os.path.join(UPLOAD_DIR, comment_filename)
+
+            # 并行执行：核心检测、批注生成、参考文献检测、页眉页脚检测
             checker = ThesisChecker(save_path, reports_dir=reports_subdir, config=run_cfg)
-            try:
-                checker.run_all_checks()
 
-                # 参考文献检测
-                ref_report_text = ""
-                if GraduateReferenceChecker is not None:
-                    import io as _io
-                    from contextlib import redirect_stdout as _redirect
+            def _run_comment_gen():
+                if comment_path is not None:
                     try:
-                        ref_buf = _io.StringIO()
-                        with _redirect(ref_buf):
-                            GraduateReferenceChecker().generate_report(str(save_path))
-                        ref_report_text = ref_buf.getvalue()
+                        print(f"[INFO] 开始生成批注版: {comment_path}")
+                        run_all_checks_with_comments(save_path, comment_path)
+                        if os.path.exists(comment_path):
+                            print(f"[OK] 批注版生成成功: {comment_filename}")
+                            return True
+                        else:
+                            print(f"[WARN] 批注版文件未生成")
                     except Exception as e:
-                        ref_report_text = f"参考文献检测出错: {e}"
+                        print(f"[ERROR] 批注版生成失败: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    return False
+                return None
 
-                # 页眉页脚检测
+            def _run_ref_checker():
+                if GraduateReferenceChecker is None:
+                    return ""
+                import io as _io
+                from contextlib import redirect_stdout as _redirect
+                try:
+                    ref_buf = _io.StringIO()
+                    with _redirect(ref_buf):
+                        GraduateReferenceChecker().generate_report(str(save_path))
+                    return ref_buf.getvalue()
+                except Exception as e:
+                    return f"参考文献检测出错: {e}"
+
+            def _run_hf_checker():
                 if HeaderFooterChecker is not None:
                     try:
                         hf_report_path = os.path.join(reports_subdir, "header_footer_report.md")
                         HeaderFooterChecker().generate_report(save_path, hf_report_path)
                     except Exception as e:
                         print(f"页眉页脚检测出错: {e}")
+
+            try:
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    comment_future = executor.submit(_run_comment_gen)
+                    core_future = executor.submit(checker.run_all_checks)
+                    ref_future = executor.submit(_run_ref_checker)
+                    hf_future = executor.submit(_run_hf_checker)
+
+                    core_future.result()
+                    comment_ok = comment_future.result()
+                    if comment_ok is False:
+                        comment_filename = None
+                    ref_report_text = ref_future.result()
+                    hf_future.result()
+
 
                 summary_path = os.path.join(reports_subdir, "检测汇总报告.md")
                 

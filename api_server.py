@@ -17,12 +17,19 @@ import uuid
 import shutil
 import threading
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from functools import wraps
+from functools import wraps, lru_cache
 from io import BytesIO
 
 from flask import Flask, request, jsonify, send_file
 from flask.json.provider import DefaultJSONProvider
+from docx import Document as _RawDocument
+
+# 文档加载缓存，避免同一文件被重复解析
+@lru_cache(maxsize=4)
+def _cached_document(path: str):
+    return _RawDocument(path)
 
 try:
     from config_loader import load_config, get_cfg
@@ -292,24 +299,47 @@ def _run_check(file_path: str, task_id: str, uploaded_file_path: str = None) -> 
         checker = ThesisChecker(file_path, reports_dir=reports_subdir, config=run_cfg)
         checker.run_all_checks()
 
-        ref_report_text = ""
-        if GraduateReferenceChecker is not None:
+        # 并行运行 3 个独立后续任务：参考文献检测、页眉页脚检测、批注生成
+        def _run_ref_checker():
+            if GraduateReferenceChecker is None:
+                return ""
             import io as _io
             from contextlib import redirect_stdout as _redirect
             try:
                 ref_buf = _io.StringIO()
                 with _redirect(ref_buf):
                     GraduateReferenceChecker().generate_report(str(file_path))
-                ref_report_text = ref_buf.getvalue()
+                return ref_buf.getvalue()
             except Exception as e:
-                ref_report_text = f"参考文献检测出错: {e}"
+                return f"参考文献检测出错: {e}"
 
-        if HeaderFooterChecker is not None:
-            try:
-                hf_report_path = os.path.join(reports_subdir, "header_footer_report.md")
-                HeaderFooterChecker().generate_report(file_path, hf_report_path)
-            except Exception as e:
-                print(f"页眉页脚检测出错: {e}")
+        def _run_hf_checker():
+            if HeaderFooterChecker is not None:
+                try:
+                    hf_report_path = os.path.join(reports_subdir, "header_footer_report.md")
+                    HeaderFooterChecker().generate_report(file_path, hf_report_path)
+                except Exception as e:
+                    print(f"页眉页脚检测出错: {e}")
+
+        def _run_comments():
+            comment_path = os.path.join(UPLOAD_DIR, f"{task_id}_comments.docx")
+            if run_all_checks_with_comments is not None:
+                try:
+                    run_all_checks_with_comments(file_path, output_path=comment_path)
+                    if os.path.exists(comment_path):
+                        with open(comment_path, "rb") as f:
+                            return f.read()
+                except Exception as e:
+                    print(f"批注版生成出错: {e}")
+            return None
+
+        with ThreadPoolExecutor(max_workers=3) as post_executor:
+            ref_future = post_executor.submit(_run_ref_checker)
+            hf_future = post_executor.submit(_run_hf_checker)
+            comment_future = post_executor.submit(_run_comments)
+            ref_report_text = ref_future.result()
+            hf_future.result()
+            comment_bytes = comment_future.result()
 
         report_files = {
             "cover_page":    ("封面格式检测",   None),
@@ -353,7 +383,7 @@ def _run_check(file_path: str, task_id: str, uploaded_file_path: str = None) -> 
             result["summary"][check_status] = result["summary"].get(check_status, 0) + 1
 
             if content:
-                all_markdown_parts.append(f"## {display_name}\n\n{content}")
+                all_markdown_parts.append(f"## {display_name}\\n\\n{content}")
 
         consolidated_md = _build_consolidated_report(
             original_filename=os.path.basename(file_path),
@@ -368,18 +398,11 @@ def _run_check(file_path: str, task_id: str, uploaded_file_path: str = None) -> 
                 result["highlight_bytes"] = f.read()
             result["highlight_available"] = True
 
-        # 生成批注版文档
-        comment_path = os.path.join(UPLOAD_DIR, f"{task_id}_comments.docx")
+        # 从并行任务结果中设置批注文档
         result["comment_available"] = False
-        try:
-            if run_all_checks_with_comments is not None:
-                run_all_checks_with_comments(file_path, output_path=comment_path)
-                if os.path.exists(comment_path):
-                    with open(comment_path, "rb") as f:
-                        result["comment_bytes"] = f.read()
-                    result["comment_available"] = True
-        except Exception as e:
-            print(f"批注版生成出错: {e}")
+        if comment_bytes is not None:
+            result["comment_bytes"] = comment_bytes
+            result["comment_available"] = True
 
     except Exception as e:
         result["status"] = "error"

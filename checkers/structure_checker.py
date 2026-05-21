@@ -274,19 +274,56 @@ class ThesisStructureChecker:
                 chapters.append((i, num, text))
         return chapters
 
+    def _find_body_start(self, doc: Document) -> int:
+        """定位正文起始位置（跳过目录区域），返回段落索引"""
+        # 复用 _find_chapter_headings 中的目录边界定位逻辑
+        toc_heading_idx = -1
+        for i, para in enumerate(doc.paragraphs):
+            text_norm = re.sub(r'\s+', '', para.text.strip())
+            if text_norm in ('目录', '目录目录'):
+                toc_heading_idx = i
+                break
+        if toc_heading_idx < 0:
+            return 0
+        last_toc = toc_heading_idx
+        for i in range(toc_heading_idx + 1, len(doc.paragraphs)):
+            text = doc.paragraphs[i].text.strip()
+            style_name = doc.paragraphs[i].style.name.lower() if doc.paragraphs[i].style else ''
+            if not text:
+                continue
+            is_toc = False
+            if 'toc' in style_name:
+                is_toc = True
+            elif '\t' in text and re.search(r'\t\s*[IVXLCDM\d]+$', text):
+                is_toc = True
+            elif re.search(r'[\.\·…]{3,}[IVXLCDM\d]+$', text):
+                is_toc = True
+            if is_toc:
+                last_toc = i
+        return last_toc + 1
+
     def check_chapter_summary(self, doc: Document) -> dict:
         """检查每章是否包含"本章小结"段落"""
         chapters = self._find_chapter_headings(doc)
         if not chapters:
             return {"total_chapters": 0, "chapters_missing_summary": [], "issues": ["未找到章节标题"]}
 
-        # 找正文结束位置（参考文献、致谢或附录）
+        # 找正文结束位置（参考文献、致谢或附录），从正文区域开始扫描，避免目录条目干扰
+        body_start = self._find_body_start(doc)
         body_end = len(doc.paragraphs)
-        for i, para in enumerate(doc.paragraphs):
+        for i in range(body_start, len(doc.paragraphs)):
+            para = doc.paragraphs[i]
             text = re.sub(r'\s+', '', para.text.strip())
             if re.match(r'^(参考文献|致谢|附录)', text):
-                body_end = i
-                break
+                # 二次验证：排除正文中提到这些词的段落（如"致谢与附录检测。系统..."）
+                # 真正的章节标题很短（≤20字符）或使用了标题样式
+                raw_text = para.text.strip()
+                style_name = para.style.name.lower() if para.style else ''
+                is_heading_style = 'heading' in style_name or 'toc' in style_name
+                is_short = len(raw_text) <= 20
+                if is_heading_style or is_short:
+                    body_end = i
+                    break
 
         missing = []
         for idx in range(len(chapters)):

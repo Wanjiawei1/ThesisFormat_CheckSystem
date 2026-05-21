@@ -15,8 +15,13 @@ if sys.platform == 'win32':
     except (AttributeError, OSError):
         pass
 
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from config_loader import load_config, get_cfg
+
+# 高亮文件写入锁，避免并行检测时文件冲突
+_highlight_lock = threading.Lock()
 
 # 处理 PyInstaller 打包后的路径
 def get_base_dir():
@@ -146,7 +151,8 @@ class ThesisChecker:
         try:
             checker = ChapterTitleChecker()
             report_path = os.path.join(self.reports_dir, "chapter_title_report.md")
-            checker.generate_report(self.docx_path, report_path, self.highlight_path)
+            with _highlight_lock:
+                checker.generate_report(self.docx_path, report_path, self.highlight_path)
             self.reports['chapter_titles'] = {
                 'name': '章节标题格式检测',
                 'status': 'completed',
@@ -165,7 +171,8 @@ class ThesisChecker:
         try:
             checker = BodyTextChecker()
             report_path = os.path.join(self.reports_dir, "body_text_report.md")
-            checker.generate_report(self.docx_path, report_path, self.highlight_path)
+            with _highlight_lock:
+                checker.generate_report(self.docx_path, report_path, self.highlight_path)
             self.reports['body_text'] = {
                 'name': '正文格式检测',
                 'status': 'completed',
@@ -184,7 +191,8 @@ class ThesisChecker:
         try:
             checker = FigureTableFormulaTermChecker()
             report_path = os.path.join(self.reports_dir, "综合检测报告.md")
-            checker.generate_report(self.docx_path, report_path, self.highlight_path)
+            with _highlight_lock:
+                checker.generate_report(self.docx_path, report_path, self.highlight_path)
             self.reports['figures_tables'] = {
                 'name': '图表公式术语检测',
                 'status': 'completed',
@@ -222,7 +230,8 @@ class ThesisChecker:
         try:
             checker = AckAppendixChecker()
             report_path = os.path.join(self.reports_dir, "ack_appendix_report.md")
-            checker.generate_report(self.docx_path, report_path, self.highlight_path)
+            with _highlight_lock:
+                checker.generate_report(self.docx_path, report_path, self.highlight_path)
             self.reports['ack_appendix'] = {
                 'name': '致谢和附录格式检测',
                 'status': 'completed',
@@ -253,27 +262,36 @@ class ThesisChecker:
             print(f"[FAIL] 整体结构检测出错: {e}")
             
     def run_all_checks(self):
-        """运行所有检测"""
+        """运行所有检测（并行执行以提升速度）"""
         print("\n" + "="*60)
         print("开始论文格式全面检测")
         print("="*60)
         print(f"文档路径: {self.docx_path}")
         print(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        # 依次运行所有检测
-        self.check_cover_page()
-        self.check_commitment()
-        self.check_toc()
-        self.check_chapter_titles()
-        self.check_body_text()
-        self.check_figures_tables_formulas()
-        self.check_header_footer()
-        self.check_ack_appendix()
-        self.check_structure()
-        
+
+        checks = [
+            self.check_cover_page,
+            self.check_commitment,
+            self.check_toc,
+            self.check_chapter_titles,
+            self.check_body_text,
+            self.check_figures_tables_formulas,
+            self.check_header_footer,
+            self.check_ack_appendix,
+            self.check_structure,
+        ]
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(check): check.__name__ for check in checks}
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"[ERROR] {futures[future]} 执行异常: {e}")
+
         # 生成汇总报告
         self.generate_summary_report()
-        
+
     def generate_summary_report(self):
         """生成汇总报告"""
         report_path = os.path.join(self.reports_dir, "检测汇总报告.md")
