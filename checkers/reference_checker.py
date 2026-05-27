@@ -498,10 +498,20 @@ class GraduateReferenceChecker:
                         item_issues.append("期刊年份前应使用逗号 ',' 而非句号 '.'")
                     else:
                         item_issues.append("期刊缺少年份")
-                if not re.search(r'\d+\(\d+\)', content):
-                    # 也接受 "卷: 页码" 格式（有卷号但无期号）
-                    if not re.search(r'\d+\s*:', content):
-                        item_issues.append("期刊缺少卷(期)号，应为 卷(期) 格式")
+                # 检查卷(期)号格式
+                # 支持格式：卷(期)如34(04)、只有期如(06)、卷:页码如34:251
+                has_volume_issue = False
+                if re.search(r'\d+\(\d+\)', content):
+                    # 有 卷(期) 格式，正确
+                    pass
+                elif re.search(r'\(\d+\)', content):
+                    # 只有 (期) 格式，也允许
+                    pass
+                elif re.search(r'\d+\s*:', content):
+                    # 有 卷: 页码 格式，正确
+                    pass
+                else:
+                    item_issues.append("期刊缺少卷(期)号，应为 卷(期) 或 (期) 格式")
                 # 检查页码：支持起止页码(123-125)、单页码(: 97)、文章编号
                 has_page_info = False
                 # 起止页码
