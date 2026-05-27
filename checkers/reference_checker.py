@@ -381,20 +381,14 @@ class GraduateReferenceChecker:
 
             # 类型标识前应有 ". " 分隔（仅当有作者时才检查）
             # 无作者的参考文献（如网络公告、标准等）不检查此项
-            # 判断方式：类型标识后到第一个年份之间只有标点/空格/数字，说明无作者
-            # 有作者时中间会有期刊名、出版社等文字
+            # 判断方式：
+            # 1. 类型标识前没有内容（以[开头）→ 无作者
+            # 2. 类型标识前只有标点、空格、数字 → 无作者
             type_pos = content.find('[')
             if type_pos > 0:
                 before = content[:type_pos].strip()
-                after_type = content[type_pos:]
-                # 取类型标识到下一个4位年份之间的内容
-                year_match = re.search(r'\d{4}', after_type)
-                if year_match:
-                    between = after_type[after_type.find(']') + 1:year_match.start()]
-                    # 如果中间只有标点、空格、数字 → 无作者
-                    is_no_author = bool(re.fullmatch(r'[\s.．,，（）\(\)\[\]【】\d]*', between))
-                else:
-                    is_no_author = False
+                # 如果类型标识前没有实质内容（只有标点、空格等）→ 无作者
+                is_no_author = not before or bool(re.fullmatch(r'[\s.．,，（）()\[\]【】\d]*', before))
                 if not is_no_author and not re.search(r'[.．]\s', before):
                     item_issues.append("作者与题名/类型标识之间应以 '. ' 分隔")
 
