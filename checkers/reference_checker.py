@@ -384,11 +384,17 @@ class GraduateReferenceChecker:
             # 判断方式：
             # 1. 类型标识前没有内容（以[开头）→ 无作者
             # 2. 类型标识前只有标点、空格、数字 → 无作者
+            # 3. 类型标识前内容以书名号《》开头 → 无作者（以题名开头）
             type_pos = content.find('[')
             if type_pos > 0:
                 before = content[:type_pos].strip()
                 # 如果类型标识前没有实质内容（只有标点、空格等）→ 无作者
                 is_no_author = not before or bool(re.fullmatch(r'[\s.．,，（）()\[\]【】\d]*', before))
+                # 如果以书名号开头 → 无作者（以题名开头）
+                if before.startswith('《'):
+                    is_no_author = True
+                # 如果内容包含". "，说明可能是"作者. 题名"格式，是有作者的
+                # 但如果只是"题名. 期刊名"格式（无作者），则不检查
                 if not is_no_author and not re.search(r'[.．]\s', before):
                     item_issues.append("作者与题名/类型标识之间应以 '. ' 分隔")
 
