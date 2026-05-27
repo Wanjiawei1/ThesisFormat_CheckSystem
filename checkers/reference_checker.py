@@ -491,11 +491,19 @@ class GraduateReferenceChecker:
                     # 也接受 "卷: 页码" 格式（有卷号但无期号）
                     if not re.search(r'\d+\s*:', content):
                         item_issues.append("期刊缺少卷(期)号，应为 卷(期) 格式")
-                if not re.search(r'\d+[-–—]\d+', content):
-                    # 允许文章编号（Article Number）替代起止页码
-                    # 文章编号通常为单独的数字，出现在卷(期)之后
-                    if not re.search(r'\d+\(\d+\)\s*[:\s:]*\d+', content):
-                        item_issues.append("期刊缺少起止页码（或文章编号 Article Number）")
+                # 检查页码：支持起止页码(123-125)、单页码(: 97)、文章编号
+                has_page_info = False
+                # 起止页码
+                if re.search(r'\d+[-–—]\d+', content):
+                    has_page_info = True
+                # 单页码：卷(期): 页码 或 卷(期):页码
+                elif re.search(r'\(\d+\)\s*:\s*\d+', content):
+                    has_page_info = True
+                # 文章编号格式：卷(期) 数字（无冒号）
+                elif re.search(r'\d+\(\d+\)\s+\d{3,}', content):
+                    has_page_info = True
+                if not has_page_info:
+                    item_issues.append("期刊缺少页码信息（起止页码、单页码或文章编号）")
 
             elif ref_type == 'D':  # 学位论文
                 has_unit = bool(re.search(
