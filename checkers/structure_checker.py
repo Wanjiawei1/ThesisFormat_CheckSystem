@@ -370,15 +370,18 @@ class ThesisStructureChecker:
                     result["has_break_before"] = True
                     return result
 
-        # B: 前一段落 runs 中的显式分页符
-        if para_idx > 0:
-            prev = doc.paragraphs[para_idx - 1]
+        # B: 向前查找显式分页符（跳过空段落，最多查找5段）
+        for offset in range(1, min(6, para_idx + 1)):
+            prev = doc.paragraphs[para_idx - offset]
             for run in prev.runs:
                 for br in run._element.iter(qn('w:br')):
                     if br.get(qn('w:type')) == 'page':
                         result["has_explicit_break"] = True
                         result["has_break_before"] = True
                         return result
+            # 如果当前段有实质内容（非空），则停止查找
+            if prev.text.strip():
+                break
 
         # C: 段前分页属性
         pPr = para._element.find(qn('w:pPr'))
