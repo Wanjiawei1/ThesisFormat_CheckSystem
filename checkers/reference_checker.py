@@ -385,6 +385,7 @@ class GraduateReferenceChecker:
             # 1. 类型标识前没有内容（以[开头）→ 无作者
             # 2. 类型标识前只有标点、空格、数字 → 无作者
             # 3. 类型标识前内容以书名号《》开头 → 无作者（以题名开头）
+            # 4. 类型标识前内容包含题名特征词（关于、论文、研究等）→ 无作者
             type_pos = content.find('[')
             if type_pos > 0:
                 before = content[:type_pos].strip()
@@ -392,6 +393,10 @@ class GraduateReferenceChecker:
                 is_no_author = not before or bool(re.fullmatch(r'[\s.．,，（）()\[\]【】\d]*', before))
                 # 如果以书名号开头 → 无作者（以题名开头）
                 if before.startswith('《'):
+                    is_no_author = True
+                # 如果包含题名特征词 → 无作者（以题名开头，而非作者名）
+                title_keywords = ['关于', '论文', '研究', '规范', '要求', '标准', '指南', '报告', '分析', '设计', '实现', '方法', '技术', '系统', '应用', '综述', '进展', '现状', '趋势']
+                if any(kw in before for kw in title_keywords):
                     is_no_author = True
                 # 如果内容包含". "，说明可能是"作者. 题名"格式，是有作者的
                 # 但如果只是"题名. 期刊名"格式（无作者），则不检查
