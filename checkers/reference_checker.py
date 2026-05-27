@@ -759,8 +759,8 @@ class GraduateReferenceChecker:
         all_issues = (r['numbering_issues'] + r['format_issues'] +
                       r['punct_issues'] + r['author_issues'] + r['type_issues'] +
                       r.get('citation_issues', []))
-        # 去掉通过类消息计数
-        real_issues = [i for i in all_issues if i.startswith('[') or i.startswith('[警告]')]
+        # 去掉通过类消息计数（只保留警告和错误）
+        real_issues = [i for i in all_issues if i.startswith('[警告]') or i.startswith('[错误]')]
         lines.append("## 结论")
         if not r['has_title']:
             lines.append("[警告] 未找到'参考文献'标题，无法检测")
